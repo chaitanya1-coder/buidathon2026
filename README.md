@@ -26,3 +26,59 @@ AI-native IDEs and agents like **Google Antigravity** produce rich contextual as
 ---
 
 ## Architecture
+
+┌─────────────────────────────────────────────────────────┐│              Google Antigravity Environment             ││   • Task List & Implementation Plan Artifacts           ││   • Terminal Tool Invocations & Shell Logs              ││   • V1 File Artifacts / V2 Event Stream (events.jsonl)  │└───────────────────────────┬─────────────────────────────┘│ Read via workspace traversal▼┌─────────────────────────────────────────────────────────┐│                 entire-agent-antigravity                ││             (External Agent Protocol Adapter)           ││                                                         ││   ┌─────────────────────┐       ┌───────────────────┐   ││   │   V1 Legacy Parse   │       │   V2 Stream Parse │   ││   └──────────┬──────────┘       └─────────┬─────────┘   ││              └──────────────┬─────────────┘             ││                             ▼                           ││                 Unified Session IR Parser               ││                 (Partial Recovery & Tolerant)           │└───────────────────────────┬─────────────────────────────┘│ JSON over stdout▼┌─────────────────────────────────────────────────────────┐│                       Entire CLI                        ││   • Attaches context to Git commit lifecycle            ││   • Creates Checkpoint: refs/entire/checkpoints/  │└─────────────────────────────────────────────────────────┘
+---
+
+## Project Structure
+
+agents/entire-agent-antigravity/├── main.go            # Subcommand CLI router (info, hooks, transcript)├── types.go           # Protocol contracts and canonical SessionIR schemas├── parser.go          # Dual-format V1/V2 parser and fault-tolerant token scanner├── collector.go       # Workspace discovery and filesystem ingestion├── parser_test.go     # Automated test suite covering V1, V2, unknown, and truncated inputs├── go.mod             # Module definition└── README.md          # Project documentation
+---
+
+## Getting Started
+
+### Prerequisites
+
+* Go 1.21+
+* Git 2.30+
+* Entire CLI (`entireio/cli`) installed and available on `$PATH`
+
+### 1. Build and Install the Binary
+
+Entire expects external agent binaries on `$PATH` following the naming format `entire-agent-<name>`.
+
+```bash
+cd agents/entire-agent-antigravity
+go build -o entire-agent-antigravity .
+
+# Move to your system PATH (e.g., GOPATH or /usr/local/bin)
+export PATH="$PWD:$PATH"
+cp entire-agent-antigravity $(go env GOPATH)/bin/
+Verify that the CLI protocol responds:Bashentire-agent-antigravity info
+Expected output:JSON{
+  "name": "antigravity",
+  "version": "0.1.0",
+  "description": "Entire Checkpoint adapter for Google Antigravity Agent and Artifacts",
+  "features": {
+    "artifact_preservation": true,
+    "compact_transcripts": true,
+    "hooks": true,
+    "transcripts": true
+  }
+}
+2. Enable in Your RepositoryIn any project managed by Entire:Ensure external agent discovery is enabled in .entire/settings.json:JSON{
+  "external_agents": true
+}
+Register and configure the hook:Bashentire enable --agent antigravity
+Usage & VerificationIngesting In-Flight Development SessionsWhen an Antigravity agent edits a repository, it generates plan artifacts and tool logs. When committing or running Entire commands:Bash# Verify hook status
+entire-agent-antigravity are-hooks-installed
+
+# Inspect generated checkpoint transcript manually
+entire-agent-antigravity transcript
+To create an Entire Checkpoint using Git:Bashgit add .
+git commit -m "feat(auth): implement token bucket rate limiter"
+Inspect the attached metadata:Bashentire checkpoint list
+entire checkpoint show HEAD --json
+Testing & ReliabilityThe parser includes unit tests verifying zero-crash guarantees against ambiguous agent logs:V1 Legacy Format: Validates parsing of split artifact directories and execution.jsonl.V2 Stream Format: Validates parsing of event streams with envelope dispatching.Unknown Event Handling: Verifies that unmapped schema updates do not crash the binary.Incomplete Input Handling: Ensures streams truncated mid-token produce valid partial transcripts.Run the test suite:Bashgo test -v ./...
+To run against a raw JSONL fixture:Bashcat fixture.jsonl | entire-agent-antigravity transcript
+Track Compliance Checklist (Track 3)RequirementImplementation DetailStatusNew Agent IntegrationIntegrates Google Antigravity IDE and CLI runtime into EntirePassEntire Fork NativeImplemented as an idiomatic binary inside entireio/external-agentsPassContext Beyond DiffPreserves Antigravity task states, architecture plans, and negative tool outputsPassDual Format CompatibilityHandles both legacy discrete files and modern JSONL streamsPassResilience & FallbacksZero-panic guarantee on unknown events; produces partial snapshots on truncated logsPass
