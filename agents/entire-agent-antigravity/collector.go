@@ -1,13 +1,8 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 )
 
 // FindWorkspaceRoot ascends directories to find .antigravity or .git
@@ -32,80 +27,38 @@ func FindWorkspaceRoot() (string, error) {
 	return os.Getwd()
 }
 
-// IngestSession parses Antigravity artifacts and session telemetry
+// IngestSession parses Antigravity inputs through the unified SessionIR pipeline.
 func IngestSession() (*EntireTranscript, error) {
 	root, err := FindWorkspaceRoot()
 	if err != nil {
 		return nil, err
 	}
 
-	antigravityDir := filepath.Join(root, ".antigravity")
-	transcript := &EntireTranscript{
-		SessionID:   fmt.Sprintf("ag-%d", time.Now().Unix()),
-		Agent:       "antigravity",
-		Timestamp:   time.Now().UTC(),
-		UserPrompts: []string{},
-		Artifacts:   []CapturedArtifact{},
-		ToolRuns:    []CapturedToolRun{},
-		FilesEdited: []string{},
+	session := NewSessionIR()
+
+	v1Parser := &V1Parser{}
+	v1Session, err := v1Parser.Parse(root)
+	if err != nil {
+		session.MarkPartial("v1 parser error: " + err.Error())
+	} else {
+		session = MergeSessionIR(session, v1Session)
 	}
 
-	// 1. Ingest Prompt / Intent if saved
-	promptFile := filepath.Join(antigravityDir, "last_prompt.txt")
-	if promptData, err := os.ReadFile(promptFile); err == nil {
-		transcript.UserPrompts = append(transcript.UserPrompts, strings.TrimSpace(string(promptData)))
+	v2Parser := &V2Parser{}
+	v2Session, err := v2Parser.Parse(root)
+	if err != nil {
+		session.MarkPartial("v2 parser error: " + err.Error())
+	} else {
+		session = MergeSessionIR(session, v2Session)
 	}
 
-	// 2. Ingest Structured Artifacts (Task Lists, Plans)
-	artifactsDir := filepath.Join(antigravityDir, "artifacts")
-	if entries, err := os.ReadDir(artifactsDir); err == nil {
-		for _, entry := range entries {
-			if entry.IsDir() {
-				continue
-			}
-			path := filepath.Join(artifactsDir, entry.Name())
-			content, readErr := os.ReadFile(path)
-			if readErr != nil {
-				continue
-			}
-
-			artType := "plan"
-			if strings.Contains(entry.Name(), "task") {
-				artType = "task"
-			} else if strings.Contains(entry.Name(), "verify") {
-				artType = "verification"
-			}
-
-			transcript.Artifacts = append(transcript.Artifacts, CapturedArtifact{
-				Name:    entry.Name(),
-				Type:    artType,
-				Content: string(content),
-			})
-		}
+	if len(session.UserPrompts) == 0 &&
+		len(session.Artifacts) == 0 &&
+		len(session.ToolRuns) == 0 &&
+		len(session.FilesEdited) == 0 &&
+		len(session.RawEvents) == 0 {
+		session.MarkPartial("no ingestible session data found in .antigravity")
 	}
 
-	// 3. Ingest Execution & Tool Logs (Negative knowledge & bash execution)
-	logFile := filepath.Join(antigravityDir, "execution.jsonl")
-	if f, err := os.Open(logFile); err == nil {
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			var record struct {
-				Tool     string `json:"tool"`
-				Command  string `json:"command"`
-				ExitCode int    `json:"exit_code"`
-				Output   string `json:"output"`
-			}
-			if err := json.Unmarshal(scanner.Bytes(), &record); err == nil {
-				transcript.ToolRuns = append(transcript.ToolRuns, CapturedToolRun{
-					ToolName: record.Tool,
-					Command:  record.Command,
-					ExitCode: record.ExitCode,
-					Output:   record.Output,
-				})
-			}
-		}
-	}
-
-	return transcript, nil
+	return session.ToEntireTranscript(), nil
 }
