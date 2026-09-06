@@ -1,0 +1,30 @@
+{
+  "cli_version": "0.10.5",
+  "checkpoint_id": "01M1V01D7C5NZZK9BTP9S1RGMK",
+  "strategy": "manual-commit",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "agents/entire-agent-antigravity/collector.go",
+    "agents/entire-agent-antigravity/entire-agent-antigravity",
+    "agents/entire-agent-antigravity/main.go",
+    "agents/entire-agent-antigravity/parser.go",
+    "agents/entire-agent-antigravity/parser_test.go"
+  ],
+  "sessions": [
+    {
+      "metadata": "/0/metadata.json",
+      "transcript": "/0/full.jsonl",
+      "compact_transcript": "/0/transcript.jsonl",
+      "content_hash": "/0/content_hash.txt",
+      "prompt": "/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 5701,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 989341,
+    "output_tokens": 2393,
+    "api_call_count": 1
+  }
+}
