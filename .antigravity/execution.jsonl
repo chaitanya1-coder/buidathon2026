@@ -1,0 +1,2 @@
+{"tool": "bash", "command": "npm test", "exit_code": 1, "output": "TypeError: Cannot read properties of undefined (reading 'headers')"}
+{"tool": "bash", "command": "npm test", "exit_code": 0, "output": "Pass: 12 tests passed"}
