@@ -18,6 +18,8 @@ func main() {
 	switch subcommand {
 	case "info":
 		handleInfo()
+	case "detect":
+		handleDetect()
 	case "are-hooks-installed":
 		handleAreHooksInstalled()
 	case "install-hooks":
@@ -32,17 +34,41 @@ func main() {
 
 func handleInfo() {
 	resp := InfoResponse{
-		Name:        "antigravity",
-		Version:     "0.1.0",
-		Description: "Entire Checkpoint adapter for Google Antigravity Agent and Artifacts",
+		ProtocolVersion: 1,
+		Name:            "antigravity",
+		Type:            "Antigravity",
+		Version:         "0.1.0",
+		Description:     "Entire Checkpoint adapter for Google Antigravity Agent and Artifacts",
+		IsPreview:       true,
+		ProtectedDirs:   []string{".antigravity"},
+		HookNames: []string{
+			"session-start",
+			"session-end",
+			"user-prompt-submit",
+			"post-tool-use",
+			"stop",
+		},
 		Features: map[string]bool{
 			"hooks":                 true,
 			"transcripts":           true,
 			"compact_transcripts":   true,
 			"artifact_preservation": true,
 		},
+		Capabilities: map[string]bool{
+			"hooks":                    true,
+			"transcript_analyzer":      true,
+			"transcript_preparer":      false,
+			"token_calculator":         false,
+			"text_generator":           false,
+			"hook_response_writer":     false,
+			"subagent_aware_extractor": false,
+		},
 	}
 	writeJSON(resp)
+}
+
+func handleDetect() {
+	writeJSON(map[string]bool{"present": true})
 }
 
 func handleAreHooksInstalled() {

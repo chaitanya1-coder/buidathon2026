@@ -4,10 +4,16 @@ import "time"
 
 // Protocol response schemas
 type InfoResponse struct {
-	Name        string          `json:"name"`
-	Version     string          `json:"version"`
-	Description string          `json:"description"`
-	Features    map[string]bool `json:"features"`
+	ProtocolVersion int               `json:"protocol_version"`
+	Name            string            `json:"name"`
+	Type            string            `json:"type"`
+	Version         string            `json:"version"`
+	Description     string            `json:"description"`
+	IsPreview       bool              `json:"is_preview"`
+	ProtectedDirs   []string          `json:"protected_dirs"`
+	HookNames       []string          `json:"hook_names"`
+	Features        map[string]bool   `json:"features"`
+	Capabilities    map[string]bool   `json:"capabilities"`
 }
 
 type HookStatusResponse struct {
