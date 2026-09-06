@@ -25,16 +25,6 @@ AI-native IDEs and agents like **Google Antigravity** produce rich contextual as
 
 ---
 
-## Architecture
-
-┌─────────────────────────────────────────────────────────┐│              Google Antigravity Environment             ││   • Task List & Implementation Plan Artifacts           ││   • Terminal Tool Invocations & Shell Logs              ││   • V1 File Artifacts / V2 Event Stream (events.jsonl)  │└───────────────────────────┬─────────────────────────────┘│ Read via workspace traversal▼┌─────────────────────────────────────────────────────────┐│                 entire-agent-antigravity                ││             (External Agent Protocol Adapter)           ││                                                         ││   ┌─────────────────────┐       ┌───────────────────┐   ││   │   V1 Legacy Parse   │       │   V2 Stream Parse │   ││   └──────────┬──────────┘       └─────────┬─────────┘   ││              └──────────────┬─────────────┘             ││                             ▼                           ││                 Unified Session IR Parser               ││                 (Partial Recovery & Tolerant)           │└───────────────────────────┬─────────────────────────────┘│ JSON over stdout▼┌─────────────────────────────────────────────────────────┐│                       Entire CLI                        ││   • Attaches context to Git commit lifecycle            ││   • Creates Checkpoint: refs/entire/checkpoints/  │└─────────────────────────────────────────────────────────┘
----
-
-## Project Structure
-
-agents/entire-agent-antigravity/├── main.go            # Subcommand CLI router (info, hooks, transcript)├── types.go           # Protocol contracts and canonical SessionIR schemas├── parser.go          # Dual-format V1/V2 parser and fault-tolerant token scanner├── collector.go       # Workspace discovery and filesystem ingestion├── parser_test.go     # Automated test suite covering V1, V2, unknown, and truncated inputs├── go.mod             # Module definition└── README.md          # Project documentation
----
-
 ## Getting Started
 
 ### Prerequisites
@@ -82,3 +72,4 @@ entire checkpoint show HEAD --json
 Testing & ReliabilityThe parser includes unit tests verifying zero-crash guarantees against ambiguous agent logs:V1 Legacy Format: Validates parsing of split artifact directories and execution.jsonl.V2 Stream Format: Validates parsing of event streams with envelope dispatching.Unknown Event Handling: Verifies that unmapped schema updates do not crash the binary.Incomplete Input Handling: Ensures streams truncated mid-token produce valid partial transcripts.Run the test suite:Bashgo test -v ./...
 To run against a raw JSONL fixture:Bashcat fixture.jsonl | entire-agent-antigravity transcript
 Track Compliance Checklist (Track 3)RequirementImplementation DetailStatusNew Agent IntegrationIntegrates Google Antigravity IDE and CLI runtime into EntirePassEntire Fork NativeImplemented as an idiomatic binary inside entireio/external-agentsPassContext Beyond DiffPreserves Antigravity task states, architecture plans, and negative tool outputsPassDual Format CompatibilityHandles both legacy discrete files and modern JSONL streamsPassResilience & FallbacksZero-panic guarantee on unknown events; produces partial snapshots on truncated logsPass
+
