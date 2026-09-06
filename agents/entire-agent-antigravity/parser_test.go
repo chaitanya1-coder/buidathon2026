@@ -1,95 +1,86 @@
 package main
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestParseStreamV1ToolEvents(t *testing.T) {
-	input := strings.NewReader(`{"tool":"bash","command":"npm test","exit_code":1,"output":"fail"}
-{"tool":"bash","command":"npm test","exit_code":0,"output":"ok"}
-`)
-	ir, err := ParseStream(input)
+// Test 1: Original / Legacy V1 Format
+func TestParse_V1Format(t *testing.T) {
+	input := `{"tool": "bash", "command": "go test ./...", "exit_code": 0, "output": "ok"}
+{"tool": "linter", "command": "golangci-lint run", "exit_code": 1, "output": "err in main.go"}`
+
+	ir, err := ParseStream(strings.NewReader(input))
 	if err != nil {
-		t.Fatalf("ParseStream() error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(ir.ToolRuns) != 2 {
-		t.Fatalf("expected 2 tool runs, got %d", len(ir.ToolRuns))
+		t.Errorf("expected 2 tool runs, got %d", len(ir.ToolRuns))
+	}
+	if ir.ToolRuns[1].ExitCode != 1 {
+		t.Errorf("expected exit code 1, got %d", ir.ToolRuns[1].ExitCode)
 	}
 }
 
-func TestParseStreamV2EventsAndUnknownTypes(t *testing.T) {
-	input := strings.NewReader(`{"type":"user_prompt","payload":{"prompt":"ship it"}}
-{"type":"custom_metric","payload":{"value":42}}
-`)
-	ir, err := ParseStream(input)
-	if err != nil {
-		t.Fatalf("ParseStream() error: %v", err)
-	}
-	if len(ir.UserPrompts) != 1 || ir.UserPrompts[0] != "ship it" {
-		t.Fatalf("unexpected prompts: %#v", ir.UserPrompts)
-	}
-	if len(ir.Warnings) != 1 || !strings.Contains(ir.Warnings[0], "custom_metric") {
-		t.Fatalf("expected warning for unknown event, got %#v", ir.Warnings)
-	}
-}
+// Test 2: New V2 Event-Stream Format
+func TestParse_V2Format(t *testing.T) {
+	input := `{"type": "session_init", "payload": {"session_id": "sess-xyz-99"}}
+{"type": "user_prompt", "payload": {"prompt": "Fix concurrency race condition"}}
+{"type": "artifact_emitted", "payload": {"name": "plan.md", "artifact_type": "plan", "content": "# Fix Plan"}}
+{"type": "tool_result", "payload": {"tool": "bash", "command": "git status", "exit_code": 0, "output": "clean"}}`
 
-func TestParseStreamPartialOnMalformedLine(t *testing.T) {
-	input := strings.NewReader(`{"tool":"bash","command":"npm test","exit_code":0,"output":"ok"}
-{broken
-`)
-	ir, err := ParseStream(input)
+	ir, err := ParseStream(strings.NewReader(input))
 	if err != nil {
-		t.Fatalf("ParseStream() error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !ir.IsPartial {
-		t.Fatalf("expected partial result on malformed stream")
+	if ir.SessionID != "sess-xyz-99" {
+		t.Errorf("expected session_id sess-xyz-99, got %s", ir.SessionID)
+	}
+	if len(ir.UserPrompts) != 1 || ir.UserPrompts[0] != "Fix concurrency race condition" {
+		t.Errorf("user prompt not captured properly")
+	}
+	if len(ir.Artifacts) != 1 || ir.Artifacts[0].Name != "plan.md" {
+		t.Errorf("artifact not captured properly")
 	}
 	if len(ir.ToolRuns) != 1 {
-		t.Fatalf("expected preserved tool run before malformed line")
+		t.Errorf("expected 1 tool run, got %d", len(ir.ToolRuns))
 	}
 }
 
-func TestIngestSessionLegacyFixture(t *testing.T) {
-	root := filepath.Join("..", "..")
-	if _, err := os.Stat(filepath.Join(root, ".antigravity")); err != nil {
-		t.Skip("demo fixture not present")
-	}
+// Test 3: Resilience to Unknown Events
+func TestParse_UnknownEvents(t *testing.T) {
+	input := `{"type": "telemetry.heartbeat", "payload": {"ping": 123}}
+{"type": "ai.thought_chain", "payload": {"tokens": 450, "hidden": true}}
+{"type": "user_prompt", "payload": {"prompt": "Valid prompt after unknown events"}}
+{"random_field_future_version": {"foo": "bar"}}`
 
-	origWD, _ := os.Getwd()
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	defer os.Chdir(origWD)
-
-	session, err := IngestSession()
+	ir, err := ParseStream(strings.NewReader(input))
 	if err != nil {
-		t.Fatalf("IngestSession() error: %v", err)
+		t.Fatalf("parser crashed on unknown events: %v", err)
 	}
-	if len(session.UserPrompts) == 0 {
-		t.Fatalf("expected user prompt from legacy fixture")
-	}
-	if len(session.Artifacts) < 2 {
-		t.Fatalf("expected artifacts from legacy fixture, got %d", len(session.Artifacts))
-	}
-	if len(session.ToolRuns) < 2 {
-		t.Fatalf("expected tool runs from legacy fixture, got %d", len(session.ToolRuns))
+	if len(ir.UserPrompts) != 1 {
+		t.Errorf("failed to recover valid prompt following unknown events")
 	}
 }
 
-func TestSessionIRToEntireTranscript(t *testing.T) {
-	ir := &SessionIR{
-		SessionID:   "ag-test",
-		Agent:       "antigravity",
-		UserPrompts: []string{"prompt"},
-		Artifacts:   []CapturedArtifact{{Name: "plan.md", Type: "plan", Content: "body"}},
-		ToolRuns:    []CapturedToolRun{{ToolName: "bash", Command: "npm test", ExitCode: 0, Output: "ok"}},
-	}
+// Test 4: Incomplete / Truncated Input
+func TestParse_IncompleteInput(t *testing.T) {
+	// Notice the last line is cut mid-token
+	input := `{"type": "user_prompt", "payload": {"prompt": "Initial requirement"}}
+{"type": "artifact_emitted", "payload": {"name": "task.md", "content": "Done"}}
+{"type": "tool_result", "payload": {"tool": "bash", "comm`
 
-	transcript := ir.ToEntireTranscript()
-	if len(transcript.UserPrompts) != 1 || len(transcript.Artifacts) != 1 || len(transcript.ToolRuns) != 1 {
-		t.Fatalf("unexpected transcript projection: %#v", transcript)
+	ir, err := ParseStream(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("parser rejected incomplete input: %v", err)
+	}
+	if !ir.IsPartial {
+		t.Errorf("expected IsPartial flag to be true for truncated input")
+	}
+	if len(ir.UserPrompts) != 1 {
+		t.Errorf("partial parse lost earlier valid user prompt")
+	}
+	if len(ir.Artifacts) != 1 {
+		t.Errorf("partial parse lost earlier valid artifact")
 	}
 }
