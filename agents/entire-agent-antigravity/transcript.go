@@ -164,9 +164,23 @@ func handleTranscript(sessionID string) error {
 	}
 	sessionTranscript.SessionID = sessionID
 
-	// Try reading detailed transcript steps from transcript.jsonl if available
+	// Try reading detailed transcript steps and session artifacts from session directory if available
 	filePath, err := findTranscriptFile(sessionID)
 	if err == nil {
+		sessionDir := filepath.Dir(filepath.Dir(filepath.Dir(filePath)))
+		if files, err := os.ReadDir(sessionDir); err == nil {
+			for _, f := range files {
+				if !f.IsDir() && strings.HasSuffix(f.Name(), ".md") {
+					if content, err := os.ReadFile(filepath.Join(sessionDir, f.Name())); err == nil {
+						sessionTranscript.Artifacts = append(sessionTranscript.Artifacts, ArtifactDoc{
+							Type:    f.Name(),
+							Content: string(content),
+						})
+					}
+				}
+			}
+		}
+
 		if file, err := os.Open(filePath); err == nil {
 			defer file.Close()
 			scanner := bufio.NewScanner(file)
