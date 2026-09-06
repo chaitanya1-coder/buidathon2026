@@ -1,0 +1,90 @@
+Step 5: Test Suite Covering All 4 Requirements
+Create agents/entire-agent-antigravity/parser_test.go to verify compatibility:
+
+Go
+package main
+
+import (
+	"strings"
+	"testing"
+)
+
+// Test 1: Original / Legacy V1 Format
+func TestParse_V1Format(t *testing.T) {
+	input := `{"tool": "bash", "command": "go test ./...", "exit_code": 0, "output": "ok"}
+{"tool": "linter", "command": "golangci-lint run", "exit_code": 1, "output": "err in main.go"}`
+
+	ir, err := ParseStream(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ir.ToolRuns) != 2 {
+		t.Errorf("expected 2 tool runs, got %d", len(ir.ToolRuns))
+	}
+	if ir.ToolRuns[1].ExitCode != 1 {
+		t.Errorf("expected exit code 1, got %d", ir.ToolRuns[1].ExitCode)
+	}
+}
+
+// Test 2: New V2 Event-Stream Format
+func TestParse_V2Format(t *testing.T) {
+	input := `{"type": "session_init", "payload": {"session_id": "sess-xyz-99"}}
+{"type": "user_prompt", "payload": {"prompt": "Fix concurrency race condition"}}
+{"type": "artifact_emitted", "payload": {"name": "plan.md", "artifact_type": "plan", "content": "# Fix Plan"}}
+{"type": "tool_result", "payload": {"tool": "bash", "command": "git status", "exit_code": 0, "output": "clean"}}`
+
+	ir, err := ParseStream(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ir.SessionID != "sess-xyz-99" {
+		t.Errorf("expected session_id sess-xyz-99, got %s", ir.SessionID)
+	}
+	if len(ir.UserPrompts) != 1 || ir.UserPrompts[0] != "Fix concurrency race condition" {
+		t.Errorf("user prompt not captured properly")
+	}
+	if len(ir.Artifacts) != 1 || ir.Artifacts[0].Name != "plan.md" {
+		t.Errorf("artifact not captured properly")
+	}
+	if len(ir.ToolRuns) != 1 {
+		t.Errorf("expected 1 tool run, got %d", len(ir.ToolRuns))
+	}
+}
+
+// Test 3: Resilience to Unknown Events
+func TestParse_UnknownEvents(t *testing.T) {
+	input := `{"type": "telemetry.heartbeat", "payload": {"ping": 123}}
+{"type": "ai.thought_chain", "payload": {"tokens": 450, "hidden": true}}
+{"type": "user_prompt", "payload": {"prompt": "Valid prompt after unknown events"}}
+{"random_field_future_version": {"foo": "bar"}}`
+
+	ir, err := ParseStream(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("parser crashed on unknown events: %v", err)
+	}
+	if len(ir.UserPrompts) != 1 {
+		t.Errorf("failed to recover valid prompt following unknown events")
+	}
+}
+
+// Test 4: Incomplete / Truncated Input
+func TestParse_IncompleteInput(t *testing.T) {
+	// Notice the last line is cut mid-token
+	input := `{"type": "user_prompt", "payload": {"prompt": "Initial requirement"}}
+{"type": "artifact_emitted", "payload": {"name": "task.md", "content": "Done"}}
+{"type": "tool_result", "payload": {"tool": "bash", "comm`
+
+	ir, err := ParseStream(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("parser rejected incomplete input: %v", err)
+	}
+	if !ir.IsPartial {
+		t.Errorf("expected IsPartial flag to be true for truncated input")
+	}
+	if len(ir.UserPrompts) != 1 {
+		t.Errorf("partial parse lost earlier valid user prompt")
+	}
+	if len(ir.Artifacts) != 1 {
+		t.Errorf("partial parse lost earlier valid artifact")
+	}
+}

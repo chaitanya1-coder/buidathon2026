@@ -1,0 +1,50 @@
+{
+  "cli_version": "0.10.5",
+  "checkpoint_id": "01M1V04CSAYTRYN0XH2Y5WBPT6",
+  "session_id": "00c0138a-adbd-4b94-9267-733d2875a458",
+  "strategy": "manual-commit",
+  "created_at": "2026-09-06T09:17:32.595163Z",
+  "branch": "main",
+  "checkpoints_count": 1,
+  "save_step_count": 1,
+  "files_touched": [
+    "agents/entire-agent-antigravity/parser_test.go"
+  ],
+  "agent": "Cursor",
+  "model": "composer-2.5",
+  "turn_id": "fb382dea5aac",
+  "checkpoint_transcript_start": 146,
+  "transcript_lines_at_start": 146,
+  "compact_transcript_start": 24,
+  "token_usage": {
+    "input_tokens": 3759,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 506634,
+    "output_tokens": 1567,
+    "api_call_count": 1
+  },
+  "session_metrics": {
+    "turn_count": 11
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-09-06T09:17:32.559506Z",
+    "agent_lines": 55,
+    "agent_removed": 64,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 0,
+    "total_committed": 55,
+    "total_lines_changed": 119,
+    "agent_percentage": 100,
+    "metric_version": 2
+  },
+  "prompt_attributions": [
+    {
+      "checkpoint_number": 1,
+      "user_lines_added": 0,
+      "user_lines_removed": 0,
+      "agent_lines_added": 0,
+      "agent_lines_removed": 0
+    }
+  ]
+}
