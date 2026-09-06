@@ -1,0 +1,159 @@
+Step 3: Implement Dual-Format Parser (parser.go)
+Create agents/entire-agent-antigravity/parser.go:
+
+Go
+package main
+
+import (
+	"bufio"
+	"encoding/json"
+	"io"
+	"strings"
+	"time"
+)
+
+// SessionIR is the unified representation consumed by Checkpoint writers
+type SessionIR struct {
+	SessionID   string             `json:"session_id"`
+	Agent       string             `json:"agent"`
+	Timestamp   time.Time          `json:"timestamp"`
+	UserPrompts []string           `json:"user_prompts"`
+	Artifacts   []CapturedArtifact `json:"artifacts"`
+	ToolRuns    []CapturedToolRun  `json:"tool_runs"`
+	FilesEdited []string           `json:"files_edited"`
+	IsPartial   bool               `json:"is_partial,omitempty"`
+	Warnings    []string           `json:"warnings,omitempty"`
+}
+
+// FormatVersion detector
+type FormatVersion string
+
+const (
+	FormatV1Legacy FormatVersion = "v1"
+	FormatV2Stream FormatVersion = "v2"
+)
+
+// V2Event represents the envelope for new lifecycle events
+type V2LifecycleEvent struct {
+	Timestamp string                 `json:"timestamp"`
+	Type      string                 `json:"type"` // e.g. "session_init", "prompt", "artifact_patch", "tool_result"
+	SessionID string                 `json:"session_id,omitempty"`
+	Payload   map[string]interface{} `json:"payload"`
+}
+
+// ParseStream reads lines defensively, handling both formats, unknown events, and truncated files
+func ParseStream(r io.Reader) (*SessionIR, error) {
+	ir := &SessionIR{
+		Agent:       "antigravity",
+		Timestamp:   time.Now().UTC(),
+		UserPrompts: make([]string, 0),
+		Artifacts:   make([]CapturedArtifact, 0),
+		ToolRuns:    make([]CapturedToolRun, 0),
+		FilesEdited: make([]string, 0),
+	}
+
+	scanner := bufio.NewScanner(r)
+	lineNum := 0
+
+	for scanner.Scan() {
+		lineNum++
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		// Parse envelope
+		var rawMap map[string]interface{}
+		if err := json.Unmarshal([]byte(line), &rawMap); err != nil {
+			// Incomplete / truncated line: record warning and continue to produce partial result
+			ir.IsPartial = true
+			ir.Warnings = append(ir.Warnings, "truncated or corrupted record skipped at line")
+			continue
+		}
+
+		// Detect format: V2 has a top-level "type" with a nested "payload", V1 has "tool" or file properties
+		if eventType, hasType := rawMap["type"].(string); hasType {
+			processV2Event(eventType, rawMap, ir)
+		} else if _, hasTool := rawMap["tool"]; hasTool {
+			processV1ToolEvent(rawMap, ir)
+		} else {
+			// Unknown event format: MUST NOT CRASH
+			ir.Warnings = append(ir.Warnings, "unrecognized event signature ignored")
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		// Stream ended unexpectedly (incomplete input) -> preserve whatever was collected
+		ir.IsPartial = true
+		ir.Warnings = append(ir.Warnings, "stream ended prematurely: "+err.Error())
+	}
+
+	if ir.SessionID == "" {
+		ir.SessionID = "ag-session-recovered"
+	}
+
+	return ir, nil
+}
+
+func processV2Event(eventType string, raw map[string]interface{}, ir *SessionIR) {
+	// Safely extract payload without panicking
+	payload, _ := raw["payload"].(map[string]interface{})
+	if payload == nil {
+		payload = raw // fallback if payload is top-level
+	}
+
+	switch eventType {
+	case "session.start", "session_init":
+		if id, ok := payload["session_id"].(string); ok {
+			ir.SessionID = id
+		}
+	case "prompt.received", "user_prompt":
+		if p, ok := payload["prompt"].(string); ok && p != "" {
+			ir.UserPrompts = append(ir.UserPrompts, p)
+		}
+	case "artifact.update", "artifact_emitted":
+		name, _ := payload["name"].(string)
+		artType, _ := payload["artifact_type"].(string)
+		content, _ := payload["content"].(string)
+		if name != "" {
+			ir.Artifacts = append(ir.Artifacts, CapturedArtifact{
+				Name:    name,
+				Type:    artType,
+				Content: content,
+			})
+		}
+	case "tool.execution", "tool_result":
+		toolName, _ := payload["tool"].(string)
+		cmd, _ := payload["command"].(string)
+		out, _ := payload["output"].(string)
+		exitCode := 0
+		if ec, ok := payload["exit_code"].(float64); ok {
+			exitCode = int(ec)
+		}
+		ir.ToolRuns = append(ir.ToolRuns, CapturedToolRun{
+			ToolName: toolName,
+			Command:  cmd,
+			ExitCode: exitCode,
+			Output:   out,
+		})
+	default:
+		// UNKNOWN EVENTS: Must not crash, quietly absorb or record warning
+		ir.Warnings = append(ir.Warnings, "unhandled v2 event type: "+eventType)
+	}
+}
+
+func processV1ToolEvent(raw map[string]interface{}, ir *SessionIR) {
+	tool, _ := raw["tool"].(string)
+	cmd, _ := raw["command"].(string)
+	out, _ := raw["output"].(string)
+	exitCode := 0
+	if ec, ok := raw["exit_code"].(float64); ok {
+		exitCode = int(ec)
+	}
+	ir.ToolRuns = append(ir.ToolRuns, CapturedToolRun{
+		ToolName: tool,
+		Command:  cmd,
+		ExitCode: exitCode,
+		Output:   out,
+	})
+}
