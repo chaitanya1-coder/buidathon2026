@@ -1,0 +1,38 @@
+implement Step 7: Create the Hackathon Demo Fixture
+To execute an end-to-end demo without waiting for live external services:
+
+Populate .antigravity/ with sample artifacts:
+
+Bash
+mkdir -p .antigravity/artifacts
+
+echo "Refactor auth middleware to use JWT and add rate limiting" > .antigravity/last_prompt.txt
+
+cat << 'EOF' > .antigravity/artifacts/task_list.md
+# Antigravity Task List
+- [x] Create TokenBucket rate limiter
+- [x] Integrate rate limiter into auth pipeline
+- [ ] Implement Redis-backed token invalidation (Postponed: out of scope)
+EOF
+
+cat << 'EOF' > .antigravity/artifacts/implementation_plan.md
+# Implementation Plan
+1. Target: `src/middleware/auth.ts`
+2. Assumption: Client passes Bearer token in headers.
+3. Note: Avoided importing `ioredis` to keep container footprint light.
+EOF
+
+cat << 'EOF' > .antigravity/execution.jsonl
+{"tool": "bash", "command": "npm test", "exit_code": 1, "output": "TypeError: Cannot read properties of undefined (reading 'headers')"}
+{"tool": "bash", "command": "npm test", "exit_code": 0, "output": "Pass: 12 tests passed"}
+EOF
+Trigger Checkpoint Creation via Git/Entire:
+
+Bash
+git add .
+git commit -m "feat(auth): integrate rate-limited auth pipeline"
+Verify the Checkpoint Payload:
+
+Bash
+entire checkpoint list
+entire checkpoint show HEAD --json
