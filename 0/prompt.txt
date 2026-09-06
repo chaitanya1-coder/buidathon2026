@@ -1,0 +1,88 @@
+implement Step 7: Create the Hackathon Demo Fixture
+To execute an end-to-end demo without waiting for live external services:
+
+Populate .antigravity/ with sample artifacts:
+
+Bash
+mkdir -p .antigravity/artifacts
+
+echo "Refactor auth middleware to use JWT and add rate limiting" > .antigravity/last_prompt.txt
+
+cat << 'EOF' > .antigravity/artifacts/task_list.md
+# Antigravity Task List
+- [x] Create TokenBucket rate limiter
+- [x] Integrate rate limiter into auth pipeline
+- [ ] Implement Redis-backed token invalidation (Postponed: out of scope)
+EOF
+
+cat << 'EOF' > .antigravity/artifacts/implementation_plan.md
+# Implementation Plan
+1. Target: `src/middleware/auth.ts`
+2. Assumption: Client passes Bearer token in headers.
+3. Note: Avoided importing `ioredis` to keep container footprint light.
+EOF
+
+cat << 'EOF' > .antigravity/execution.jsonl
+{"tool": "bash", "command": "npm test", "exit_code": 1, "output": "TypeError: Cannot read properties of undefined (reading 'headers')"}
+{"tool": "bash", "command": "npm test", "exit_code": 0, "output": "Pass: 12 tests passed"}
+EOF
+Trigger Checkpoint Creation via Git/Entire:
+
+Bash
+git add .
+git commit -m "feat(auth): integrate rate-limited auth pipeline"
+Verify the Checkpoint Payload:
+
+Bash
+entire checkpoint list
+entire checkpoint show HEAD --json
+
+---
+
+Step 1: Use Entire Graph to Identify Affected Paths
+Before modifying code, query the Entire Graph across your repo fork to locate every dependent caller, type definition, and serializer connected to the transcript lifecycle:
+
+Bash
+# 1. Surface all callers and references to the transcript ingest/parse logic
+entire graph query callers --symbol "IngestSession"
+entire graph query callers --symbol "EntireTranscript"
+
+# 2. Check downstream serialization and checkpoint writing paths
+entire graph query downstream --node "pkg/checkpoint/writer.go"
+entire graph query downstream --node "agents/entire-agent-antigravity/main.go"
+The graph will isolate four critical junctures:
+
+Parser & Ingest: collector.go (ingesting disk logs and artifacts).
+
+Lifecycle Handlers: handleTranscript() in main.go.
+
+Summary & Reducer Paths: Code extracting prompts, negative knowledge, and tool execution counts.
+
+Checkpoint Commit Pipe: The serializer writing out refs/entire/checkpoints/*.
+
+---
+
+implement Step 2: Unified Intermediate Representation (IR) Architecture
+To satisfy "Do not duplicate the entire implementation for each format", use the Parser / Intermediate Representation (IR) pattern:
+
+Both V1 (directory-based artifacts + legacy JSONL) and V2 (unified event-stream JSONL) parse into a shared, canonical SessionIR.
+
+Unknown event types are stored in an open RawPayload / Attributes map without failing.
+
+Incomplete transcripts produce a SessionIR marked with Partial: true rather than aborting.
+
+┌──────────────────────────────────────┐       ┌──────────────────────────────────────┐
+│       V1 Input (Legacy Files)        │       │       V2 Input (Unified JSONL)       │
+│  .antigravity/artifacts/*.md         │       │  {"type":"artifact_update", ...}     │
+│  .antigravity/execution.jsonl        │       │  {"type":"tool_call", ...}           │
+└──────────────────┬───────────────────┘       └──────────────────┬───────────────────┘
+                   │                                              │
+                   ▼                                              ▼
+           v1Parser.Parse()                               v2Parser.Parse()
+                   │                                              │
+                   └──────────────────────┬───────────────────────┘
+                                          ▼
+                             Unified SessionIR (Canonical)
+                             - Best-effort extraction
+                             - Resilient against unknown types
+                             - Preserves checkpoint schema
