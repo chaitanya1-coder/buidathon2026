@@ -22,16 +22,6 @@ type HooksConfig struct {
 	Hooks map[string][]HookMatcher `json:"hooks"`
 }
 
-type InstalledResponse struct {
-	Installed bool `json:"installed"`
-}
-
-type InstallHooksResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Path    string `json:"path"`
-}
-
 func getAntigravityDir(targetDir string) string {
 	if targetDir == "" {
 		targetDir = "."
@@ -110,10 +100,9 @@ func handleInstallHooks(targetDir string) error {
 		return fmt.Errorf("failed to write %s: %w", hooksFile, err)
 	}
 
-	res := InstallHooksResponse{
+	res := HookInstallResponse{
 		Success: true,
-		Message: "Antigravity session hooks injected successfully",
-		Path:    hooksFile,
+		Message: fmt.Sprintf("Antigravity session hooks injected successfully at %s", hooksFile),
 	}
 
 	encoder := json.NewEncoder(os.Stdout)
@@ -136,7 +125,7 @@ func handleAreHooksInstalled(targetDir string) error {
 		}
 	}
 
-	res := InstalledResponse{
+	res := HookStatusResponse{
 		Installed: installed,
 	}
 

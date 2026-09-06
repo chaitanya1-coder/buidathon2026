@@ -7,31 +7,20 @@ import (
 	"strings"
 )
 
-type Features struct {
-	Hooks             bool `json:"hooks"`
-	Transcripts       bool `json:"transcripts"`
-	CompactTranscripts bool `json:"compact_transcripts"`
-}
-
-type AgentInfo struct {
-	Name     string   `json:"name"`
-	Version  string   `json:"version"`
-	Features Features `json:"features"`
-}
-
 func handleInfo() error {
 	agentName := "antigravity"
 	if strings.Contains(filepath.Base(os.Args[0]), "opencode") {
 		agentName = "opencode"
 	}
 
-	info := AgentInfo{
-		Name:    agentName,
-		Version: "0.1.0",
-		Features: Features{
-			Hooks:             true,
-			Transcripts:       true,
-			CompactTranscripts: true,
+	info := InfoResponse{
+		Name:        agentName,
+		Version:     "0.1.0",
+		Description: "Entire CLI adapter for Antigravity Agent",
+		Features: map[string]bool{
+			"hooks":               true,
+			"transcripts":         true,
+			"compact_transcripts": true,
 		},
 	}
 

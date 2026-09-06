@@ -10,28 +10,6 @@ import (
 	"time"
 )
 
-type EntireSessionTranscript struct {
-	SessionID   string        `json:"session_id"`
-	Agent       string        `json:"agent"`
-	Timestamp   time.Time     `json:"timestamp"`
-	Prompts     []string      `json:"prompts"`
-	Artifacts   []ArtifactDoc `json:"artifacts"`
-	ToolRuns    []ToolRecord  `json:"tool_runs"`
-	FilesEdited []string      `json:"files_edited"`
-}
-
-type ArtifactDoc struct {
-	Type    string `json:"type"` // "task_list", "implementation_plan", "verification"
-	Content string `json:"content"`
-}
-
-type ToolRecord struct {
-	ToolName string `json:"tool_name"`
-	Input    string `json:"input"`
-	Output   string `json:"output"`
-	ExitCode int    `json:"exit_code"`
-}
-
 type ToolCall struct {
 	Name string                 `json:"name"`
 	Args map[string]interface{} `json:"args,omitempty"`
@@ -47,28 +25,42 @@ type TranscriptStep struct {
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
-func parseAntigravityExecutionLogs(logData []byte) []ToolRecord {
-	var toolRuns []ToolRecord
+func artifactTypeFromName(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "task"):
+		return "task"
+	case strings.Contains(lower, "plan"):
+		return "plan"
+	case strings.Contains(lower, "verification"):
+		return "verification"
+	default:
+		return "artifact"
+	}
+}
+
+func parseAntigravityExecutionLogs(logData []byte) []CapturedToolRun {
+	var toolRuns []CapturedToolRun
 	lines := strings.Split(string(logData), "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		var record ToolRecord
+		var record CapturedToolRun
 		if err := json.Unmarshal([]byte(line), &record); err == nil && record.ToolName != "" {
 			toolRuns = append(toolRuns, record)
 			continue
 		}
-		// Plain text log format fallback parsing: [TOOL] ToolName | Input | Output | ExitCode
+		// Plain text log format fallback parsing: [TOOL] ToolName | Command | Output | ExitCode
 		if strings.HasPrefix(line, "[TOOL]") {
 			parts := strings.SplitN(line, "|", 4)
-			rec := ToolRecord{}
+			rec := CapturedToolRun{}
 			if len(parts) > 0 {
 				rec.ToolName = strings.TrimSpace(strings.TrimPrefix(parts[0], "[TOOL]"))
 			}
 			if len(parts) > 1 {
-				rec.Input = strings.TrimSpace(parts[1])
+				rec.Command = strings.TrimSpace(parts[1])
 			}
 			if len(parts) > 2 {
 				rec.Output = strings.TrimSpace(parts[2])
@@ -79,8 +71,8 @@ func parseAntigravityExecutionLogs(logData []byte) []ToolRecord {
 	return toolRuns
 }
 
-func CollectAntigravitySession(workspaceRoot string) (*EntireSessionTranscript, error) {
-	transcript := &EntireSessionTranscript{
+func CollectAntigravitySession(workspaceRoot string) (*EntireTranscript, error) {
+	transcript := &EntireTranscript{
 		Agent:     "antigravity",
 		Timestamp: time.Now(),
 	}
@@ -94,8 +86,9 @@ func CollectAntigravitySession(workspaceRoot string) (*EntireSessionTranscript, 
 			}
 			content, err := os.ReadFile(filepath.Join(artifactsDir, file.Name()))
 			if err == nil {
-				transcript.Artifacts = append(transcript.Artifacts, ArtifactDoc{
-					Type:    file.Name(),
+				transcript.Artifacts = append(transcript.Artifacts, CapturedArtifact{
+					Name:    file.Name(),
+					Type:    artifactTypeFromName(file.Name()),
 					Content: string(content),
 				})
 			}
@@ -172,8 +165,9 @@ func handleTranscript(sessionID string) error {
 			for _, f := range files {
 				if !f.IsDir() && strings.HasSuffix(f.Name(), ".md") {
 					if content, err := os.ReadFile(filepath.Join(sessionDir, f.Name())); err == nil {
-						sessionTranscript.Artifacts = append(sessionTranscript.Artifacts, ArtifactDoc{
-							Type:    f.Name(),
+						sessionTranscript.Artifacts = append(sessionTranscript.Artifacts, CapturedArtifact{
+							Name:    f.Name(),
+							Type:    artifactTypeFromName(f.Name()),
 							Content: string(content),
 						})
 					}
@@ -199,13 +193,13 @@ func handleTranscript(sessionID string) error {
 				var step TranscriptStep
 				if err := json.Unmarshal(line, &step); err == nil {
 					if step.Type == "USER_INPUT" && step.Content != "" {
-						sessionTranscript.Prompts = append(sessionTranscript.Prompts, step.Content)
+						sessionTranscript.UserPrompts = append(sessionTranscript.UserPrompts, step.Content)
 					}
 					for _, tc := range step.ToolCalls {
-						toolInput, _ := json.Marshal(tc.Args)
-						sessionTranscript.ToolRuns = append(sessionTranscript.ToolRuns, ToolRecord{
+						toolCommand, _ := json.Marshal(tc.Args)
+						sessionTranscript.ToolRuns = append(sessionTranscript.ToolRuns, CapturedToolRun{
 							ToolName: tc.Name,
-							Input:    string(toolInput),
+							Command:  string(toolCommand),
 							Output:   step.Content,
 							ExitCode: 0,
 						})
