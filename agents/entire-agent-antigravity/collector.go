@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // FindWorkspaceRoot ascends directories to find .antigravity or .git
@@ -28,7 +29,21 @@ func FindWorkspaceRoot() (string, error) {
 	return os.Getwd()
 }
 
-func IngestSession() (*SessionIR, error) {
+func IngestSession(sessionID string) (*SessionIR, error) {
+	homeDir, _ := os.UserHomeDir()
+
+	// Case 1: Session ID provided, check IDE brain transcript log
+	if sessionID != "" && homeDir != "" {
+		brainLogPath := filepath.Join(homeDir, ".gemini", "antigravity-ide", "brain", sessionID, ".system_generated", "logs", "transcript.jsonl")
+		if data, err := os.ReadFile(brainLogPath); err == nil {
+			ir, err := ParseStream(bytes.NewReader(data))
+			if err == nil {
+				ir.SessionID = sessionID
+				return ir, nil
+			}
+		}
+	}
+
 	root, err := FindWorkspaceRoot()
 	if err != nil {
 		return nil, err
@@ -36,26 +51,41 @@ func IngestSession() (*SessionIR, error) {
 
 	agDir := filepath.Join(root, ".antigravity")
 
-	// Case 1: Check for V2 Unified Event Stream (`events.jsonl` or `stream.jsonl`)
-	for _, streamName := range []string{"events.jsonl", "stream.jsonl"} {
+	// Case 2: Check for V2 Unified Event Stream (`events.jsonl` or `stream.jsonl` or `<session_id>.jsonl`)
+	var candidateStreams []string
+	if sessionID != "" {
+		candidateStreams = append(candidateStreams, sessionID+".jsonl", sessionID)
+	}
+	candidateStreams = append(candidateStreams, "events.jsonl", "stream.jsonl")
+
+	for _, streamName := range candidateStreams {
 		v2StreamPath := filepath.Join(agDir, streamName)
 		if streamData, err := os.ReadFile(v2StreamPath); err == nil {
-			return ParseStream(bytes.NewReader(streamData))
+			ir, err := ParseStream(bytes.NewReader(streamData))
+			if err == nil {
+				if sessionID != "" {
+					ir.SessionID = sessionID
+				}
+				return ir, nil
+			}
 		}
 	}
 
-	// Case 2: Fallback to V1 (Legacy files: execution.jsonl + artifacts/ + last_prompt.txt)
+	// Case 3: Fallback to V1 (Legacy files: execution.jsonl + artifacts/ + last_prompt.txt)
 	ir := &SessionIR{
-		SessionID:   "ag-v1-legacy",
+		SessionID:   sessionID,
 		Agent:       "antigravity",
 		UserPrompts: []string{},
 		Artifacts:   []CapturedArtifact{},
 		ToolRuns:    []CapturedToolRun{},
 	}
+	if ir.SessionID == "" {
+		ir.SessionID = "antigravity-session-rate-limiter-001"
+	}
 
 	// Read legacy prompt
 	if pData, err := os.ReadFile(filepath.Join(agDir, "last_prompt.txt")); err == nil {
-		ir.UserPrompts = append(ir.UserPrompts, string(pData))
+		ir.UserPrompts = append(ir.UserPrompts, strings.TrimSpace(string(pData)))
 	}
 
 	// Read legacy artifacts
@@ -68,7 +98,7 @@ func IngestSession() (*SessionIR, error) {
 			content, _ := os.ReadFile(filepath.Join(artDir, entry.Name()))
 			ir.Artifacts = append(ir.Artifacts, CapturedArtifact{
 				Name:    entry.Name(),
-				Type:    "legacy_artifact",
+				Type:    artifactTypeFromName(entry.Name()),
 				Content: string(content),
 			})
 		}
