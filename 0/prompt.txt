@@ -1,0 +1,11 @@
+Step 6: Verification & Mentor Review
+Run the test suite:
+
+Bash
+go test -v ./agents/entire-agent-antigravity/...
+Test against the mentor's attached fixture:
+
+Bash
+cat path/to/mentor_fixture.jsonl | ./entire-agent-antigravity transcript
+Commit and check Entire Checkpoint integrity:
+Verify that entire checkpoint show HEAD --json emits valid checkpoint metadata for both V1 and V2 sessions without schema breakage.
