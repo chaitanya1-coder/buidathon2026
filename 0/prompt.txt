@@ -1,0 +1,14 @@
+Step 6: Configure Entire to Use the Agent
+In your demo target repository:
+
+Enable external agents in .entire/settings.json:
+
+JSON
+{
+  "external_agents": true
+}
+Run install hooks:
+
+Bash
+entire enable --agent antigravity
+Entire will execute entire-agent-antigravity install-hooks and initialize .antigravity/entire_hook.json.
