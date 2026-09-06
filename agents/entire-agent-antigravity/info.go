@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 type Features struct {
@@ -18,8 +20,13 @@ type AgentInfo struct {
 }
 
 func handleInfo() error {
+	agentName := "antigravity"
+	if strings.Contains(filepath.Base(os.Args[0]), "opencode") {
+		agentName = "opencode"
+	}
+
 	info := AgentInfo{
-		Name:    "antigravity",
+		Name:    agentName,
 		Version: "0.1.0",
 		Features: Features{
 			Hooks:             true,
