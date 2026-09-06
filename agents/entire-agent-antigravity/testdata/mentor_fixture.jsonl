@@ -1,0 +1,7 @@
+{"type": "session_init", "payload": {"session_id": "mentor-review-v2-001"}}
+{"type": "user_prompt", "payload": {"prompt": "Refactor auth middleware to use JWT and add rate limiting"}}
+{"type": "artifact_emitted", "payload": {"name": "implementation_plan.md", "artifact_type": "plan", "content": "# Implementation Plan\n1. Target: src/middleware/auth.ts\n"}}
+{"type": "artifact_emitted", "payload": {"name": "task_list.md", "artifact_type": "task", "content": "# Task List\n- [x] Add TokenBucket limiter\n"}}
+{"type": "tool_result", "payload": {"tool": "bash", "command": "npm test", "exit_code": 1, "output": "TypeError: Cannot read properties of undefined (reading 'headers')"}}
+{"type": "tool_result", "payload": {"tool": "bash", "command": "npm test", "exit_code": 0, "output": "Pass: 12 tests passed"}}
+{"type": "telemetry.heartbeat", "payload": {"ping": 1}}
