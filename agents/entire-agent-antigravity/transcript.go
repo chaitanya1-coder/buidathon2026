@@ -7,7 +7,30 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
+
+type EntireSessionTranscript struct {
+	SessionID   string        `json:"session_id"`
+	Agent       string        `json:"agent"`
+	Timestamp   time.Time     `json:"timestamp"`
+	Prompts     []string      `json:"prompts"`
+	Artifacts   []ArtifactDoc `json:"artifacts"`
+	ToolRuns    []ToolRecord  `json:"tool_runs"`
+	FilesEdited []string      `json:"files_edited"`
+}
+
+type ArtifactDoc struct {
+	Type    string `json:"type"` // "task_list", "implementation_plan", "verification"
+	Content string `json:"content"`
+}
+
+type ToolRecord struct {
+	ToolName string `json:"tool_name"`
+	Input    string `json:"input"`
+	Output   string `json:"output"`
+	ExitCode int    `json:"exit_code"`
+}
 
 type ToolCall struct {
 	Name string                 `json:"name"`
@@ -24,9 +47,69 @@ type TranscriptStep struct {
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 }
 
-type SessionTranscript struct {
-	SessionID string           `json:"session_id"`
-	Steps     []TranscriptStep `json:"steps"`
+func parseAntigravityExecutionLogs(logData []byte) []ToolRecord {
+	var toolRuns []ToolRecord
+	lines := strings.Split(string(logData), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var record ToolRecord
+		if err := json.Unmarshal([]byte(line), &record); err == nil && record.ToolName != "" {
+			toolRuns = append(toolRuns, record)
+			continue
+		}
+		// Plain text log format fallback parsing: [TOOL] ToolName | Input | Output | ExitCode
+		if strings.HasPrefix(line, "[TOOL]") {
+			parts := strings.SplitN(line, "|", 4)
+			rec := ToolRecord{}
+			if len(parts) > 0 {
+				rec.ToolName = strings.TrimSpace(strings.TrimPrefix(parts[0], "[TOOL]"))
+			}
+			if len(parts) > 1 {
+				rec.Input = strings.TrimSpace(parts[1])
+			}
+			if len(parts) > 2 {
+				rec.Output = strings.TrimSpace(parts[2])
+			}
+			toolRuns = append(toolRuns, rec)
+		}
+	}
+	return toolRuns
+}
+
+func CollectAntigravitySession(workspaceRoot string) (*EntireSessionTranscript, error) {
+	transcript := &EntireSessionTranscript{
+		Agent:     "antigravity",
+		Timestamp: time.Now(),
+	}
+
+	// 1. Ingest Task List and Implementation Plan Artifacts
+	artifactsDir := filepath.Join(workspaceRoot, ".antigravity", "artifacts")
+	if files, err := os.ReadDir(artifactsDir); err == nil {
+		for _, file := range files {
+			if file.IsDir() {
+				continue
+			}
+			content, err := os.ReadFile(filepath.Join(artifactsDir, file.Name()))
+			if err == nil {
+				transcript.Artifacts = append(transcript.Artifacts, ArtifactDoc{
+					Type:    file.Name(),
+					Content: string(content),
+				})
+			}
+		}
+	}
+
+	// 2. Ingest Terminal / Execution logs generated during agent run
+	logPath := filepath.Join(workspaceRoot, ".antigravity", "execution.log")
+	if logData, err := os.ReadFile(logPath); err == nil {
+		// Parse tool events, exit codes, and output blocks
+		transcript.ToolRuns = parseAntigravityExecutionLogs(logData)
+	}
+
+	return transcript, nil
 }
 
 func findTranscriptFile(sessionID string) (string, error) {
@@ -34,7 +117,6 @@ func findTranscriptFile(sessionID string) (string, error) {
 		return "", fmt.Errorf("session ID is required")
 	}
 
-	// Direct file path if sessionID ends with transcript.jsonl
 	if strings.HasSuffix(sessionID, "transcript.jsonl") {
 		if _, err := os.Stat(sessionID); err == nil {
 			return sessionID, nil
@@ -60,7 +142,6 @@ func findTranscriptFile(sessionID string) (string, error) {
 		)
 	}
 
-	// Also check relative or absolute directory path
 	candidatePaths = append(candidatePaths,
 		filepath.Join(sessionID, ".system_generated", "logs", "transcript.jsonl"),
 		filepath.Join(sessionID, "transcript.jsonl"),
@@ -76,48 +157,58 @@ func findTranscriptFile(sessionID string) (string, error) {
 }
 
 func handleTranscript(sessionID string) error {
+	workspaceRoot, _ := os.Getwd()
+	sessionTranscript, err := CollectAntigravitySession(workspaceRoot)
+	if err != nil {
+		return fmt.Errorf("failed collecting session: %w", err)
+	}
+	sessionTranscript.SessionID = sessionID
+
+	// Try reading detailed transcript steps from transcript.jsonl if available
 	filePath, err := findTranscriptFile(sessionID)
-	if err != nil {
-		return err
-	}
+	if err == nil {
+		if file, err := os.Open(filePath); err == nil {
+			defer file.Close()
+			scanner := bufio.NewScanner(file)
+			const maxCapacity = 10 * 1024 * 1024
+			buf := make([]byte, 64*1024)
+			scanner.Buffer(buf, maxCapacity)
 
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("failed to open transcript file %s: %w", filePath, err)
-	}
-	defer file.Close()
+			editedFilesMap := make(map[string]bool)
 
-	var steps []TranscriptStep
-	scanner := bufio.NewScanner(file)
-	// Set larger buffer size in case of long content lines
-	const maxCapacity = 10 * 1024 * 1024
-	buf := make([]byte, 64*1024)
-	scanner.Buffer(buf, maxCapacity)
+			for scanner.Scan() {
+				line := scanner.Bytes()
+				if len(strings.TrimSpace(string(line))) == 0 {
+					continue
+				}
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(strings.TrimSpace(string(line))) == 0 {
-			continue
+				var step TranscriptStep
+				if err := json.Unmarshal(line, &step); err == nil {
+					if step.Type == "USER_INPUT" && step.Content != "" {
+						sessionTranscript.Prompts = append(sessionTranscript.Prompts, step.Content)
+					}
+					for _, tc := range step.ToolCalls {
+						toolInput, _ := json.Marshal(tc.Args)
+						sessionTranscript.ToolRuns = append(sessionTranscript.ToolRuns, ToolRecord{
+							ToolName: tc.Name,
+							Input:    string(toolInput),
+							Output:   step.Content,
+							ExitCode: 0,
+						})
+						if targetFile, ok := tc.Args["TargetFile"].(string); ok {
+							editedFilesMap[targetFile] = true
+						}
+					}
+				}
+			}
+
+			for f := range editedFilesMap {
+				sessionTranscript.FilesEdited = append(sessionTranscript.FilesEdited, f)
+			}
 		}
-
-		var step TranscriptStep
-		if err := json.Unmarshal(line, &step); err != nil {
-			// Skip unparseable lines or handle gracefully
-			continue
-		}
-		steps = append(steps, step)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading transcript file %s: %w", filePath, err)
-	}
-
-	result := SessionTranscript{
-		SessionID: sessionID,
-		Steps:     steps,
 	}
 
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(result)
+	return encoder.Encode(sessionTranscript)
 }

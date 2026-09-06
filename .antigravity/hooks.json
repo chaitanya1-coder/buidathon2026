@@ -1,0 +1,54 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if ! command -v entire \u003e/dev/null 2\u003e\u00261; then exit 0; fi; exec entire hooks antigravity post-tool-use'"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if ! command -v entire \u003e/dev/null 2\u003e\u00261; then exit 0; fi; exec entire hooks antigravity session-end'"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if ! command -v entire \u003e/dev/null 2\u003e\u00261; then exit 0; fi; exec entire hooks antigravity session-start'"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if ! command -v entire \u003e/dev/null 2\u003e\u00261; then exit 0; fi; exec entire hooks antigravity stop'"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if ! command -v entire \u003e/dev/null 2\u003e\u00261; then exit 0; fi; exec entire hooks antigravity user-prompt-submit'"
+          }
+        ]
+      }
+    ]
+  }
+}
