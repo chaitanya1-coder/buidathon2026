@@ -124,12 +124,12 @@ func handleInstallHooks() {
 }
 
 func handleTranscript() {
-	transcript, err := IngestSession()
+	session, err := IngestSession()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error collecting transcript: %v\n", err)
 		os.Exit(1)
 	}
-	writeJSON(transcript)
+	writeJSON(session.ToEntireTranscript())
 }
 
 func writeJSON(v interface{}) {

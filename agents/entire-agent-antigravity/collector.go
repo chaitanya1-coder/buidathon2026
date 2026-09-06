@@ -1,11 +1,9 @@
 package main
 
 import (
-	"fmt"
+	"bytes"
 	"os"
 	"path/filepath"
-	"strings"
-	"time"
 )
 
 // FindWorkspaceRoot ascends directories to find .antigravity or .git
@@ -30,122 +28,57 @@ func FindWorkspaceRoot() (string, error) {
 	return os.Getwd()
 }
 
-// IngestSession parses Antigravity inputs through the dual-format SessionIR pipeline.
-func IngestSession() (*EntireTranscript, error) {
+func IngestSession() (*SessionIR, error) {
 	root, err := FindWorkspaceRoot()
 	if err != nil {
 		return nil, err
 	}
 
-	session := &SessionIR{
-		SessionID:   fmt.Sprintf("ag-%d", time.Now().Unix()),
+	agDir := filepath.Join(root, ".antigravity")
+
+	// Case 1: Check for V2 Unified Event Stream (`events.jsonl` or `stream.jsonl`)
+	for _, streamName := range []string{"events.jsonl", "stream.jsonl"} {
+		v2StreamPath := filepath.Join(agDir, streamName)
+		if streamData, err := os.ReadFile(v2StreamPath); err == nil {
+			return ParseStream(bytes.NewReader(streamData))
+		}
+	}
+
+	// Case 2: Fallback to V1 (Legacy files: execution.jsonl + artifacts/ + last_prompt.txt)
+	ir := &SessionIR{
+		SessionID:   "ag-v1-legacy",
 		Agent:       "antigravity",
-		Timestamp:   time.Now().UTC(),
 		UserPrompts: []string{},
 		Artifacts:   []CapturedArtifact{},
 		ToolRuns:    []CapturedToolRun{},
-		FilesEdited: []string{},
 	}
 
-	legacy := ingestLegacyFiles(root)
-	session = MergeSessionIR(session, legacy)
+	// Read legacy prompt
+	if pData, err := os.ReadFile(filepath.Join(agDir, "last_prompt.txt")); err == nil {
+		ir.UserPrompts = append(ir.UserPrompts, string(pData))
+	}
 
-	for _, streamFile := range []string{"execution.jsonl", "session.jsonl"} {
-		path := filepath.Join(root, ".antigravity", streamFile)
-		file, err := os.Open(path)
-		if err != nil {
-			if os.IsNotExist(err) {
+	// Read legacy artifacts
+	artDir := filepath.Join(agDir, "artifacts")
+	if entries, err := os.ReadDir(artDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
 				continue
 			}
-			session.IsPartial = true
-			session.Warnings = append(session.Warnings, "failed to open "+streamFile+": "+err.Error())
-			continue
+			content, _ := os.ReadFile(filepath.Join(artDir, entry.Name()))
+			ir.Artifacts = append(ir.Artifacts, CapturedArtifact{
+				Name:    entry.Name(),
+				Type:    "legacy_artifact",
+				Content: string(content),
+			})
 		}
-
-		streamIR, err := ParseStream(file)
-		file.Close()
-		if err != nil {
-			session.IsPartial = true
-			session.Warnings = append(session.Warnings, streamFile+" parse error: "+err.Error())
-			continue
-		}
-		session = MergeSessionIR(session, streamIR)
 	}
 
-	if len(session.UserPrompts) == 0 &&
-		len(session.Artifacts) == 0 &&
-		len(session.ToolRuns) == 0 &&
-		len(session.FilesEdited) == 0 {
-		session.IsPartial = true
-		session.Warnings = append(session.Warnings, "no ingestible session data found in .antigravity")
+	// Read legacy execution log
+	if logData, err := os.ReadFile(filepath.Join(agDir, "execution.jsonl")); err == nil {
+		parsed, _ := ParseStream(bytes.NewReader(logData))
+		ir.ToolRuns = parsed.ToolRuns
 	}
 
-	return session.ToEntireTranscript(), nil
-}
-
-func ingestLegacyFiles(root string) *SessionIR {
-	ir := &SessionIR{
-		Agent:       "antigravity",
-		Timestamp:   time.Now().UTC(),
-		UserPrompts: []string{},
-		Artifacts:   []CapturedArtifact{},
-		ToolRuns:    []CapturedToolRun{},
-		FilesEdited: []string{},
-	}
-
-	antigravityDir := filepath.Join(root, ".antigravity")
-
-	promptFile := filepath.Join(antigravityDir, "last_prompt.txt")
-	if promptData, err := os.ReadFile(promptFile); err == nil {
-		if prompt := strings.TrimSpace(string(promptData)); prompt != "" {
-			ir.UserPrompts = append(ir.UserPrompts, prompt)
-		}
-	} else if !os.IsNotExist(err) {
-		ir.IsPartial = true
-		ir.Warnings = append(ir.Warnings, "failed to read last_prompt.txt: "+err.Error())
-	}
-
-	artifactsDir := filepath.Join(antigravityDir, "artifacts")
-	entries, err := os.ReadDir(artifactsDir)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			ir.IsPartial = true
-			ir.Warnings = append(ir.Warnings, "failed to read artifacts directory: "+err.Error())
-		}
-		return ir
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		path := filepath.Join(artifactsDir, entry.Name())
-		content, readErr := os.ReadFile(path)
-		if readErr != nil {
-			ir.IsPartial = true
-			ir.Warnings = append(ir.Warnings, "failed to read artifact "+entry.Name()+": "+readErr.Error())
-			continue
-		}
-		ir.Artifacts = append(ir.Artifacts, CapturedArtifact{
-			Name:    entry.Name(),
-			Type:    artifactTypeFromName(entry.Name()),
-			Content: string(content),
-		})
-	}
-
-	return ir
-}
-
-func artifactTypeFromName(name string) string {
-	lower := strings.ToLower(name)
-	switch {
-	case strings.Contains(lower, "task"):
-		return "task"
-	case strings.Contains(lower, "plan"):
-		return "plan"
-	case strings.Contains(lower, "verify"):
-		return "verification"
-	default:
-		return "artifact"
-	}
+	return ir, nil
 }

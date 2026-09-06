@@ -287,6 +287,20 @@ func appendUniqueCapturedToolRuns(dst, src []CapturedToolRun) []CapturedToolRun 
 	return dst
 }
 
+func artifactTypeFromName(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "task"):
+		return "task"
+	case strings.Contains(lower, "plan"):
+		return "plan"
+	case strings.Contains(lower, "verify"):
+		return "verification"
+	default:
+		return "artifact"
+	}
+}
+
 func capturedArtifactKey(artifact CapturedArtifact) string {
 	return artifact.Name + "|" + artifact.Type + "|" + artifact.Content
 }

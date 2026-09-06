@@ -64,18 +64,18 @@ func TestIngestSessionLegacyFixture(t *testing.T) {
 	}
 	defer os.Chdir(origWD)
 
-	transcript, err := IngestSession()
+	session, err := IngestSession()
 	if err != nil {
 		t.Fatalf("IngestSession() error: %v", err)
 	}
-	if len(transcript.UserPrompts) == 0 {
+	if len(session.UserPrompts) == 0 {
 		t.Fatalf("expected user prompt from legacy fixture")
 	}
-	if len(transcript.Artifacts) < 2 {
-		t.Fatalf("expected artifacts from legacy fixture, got %d", len(transcript.Artifacts))
+	if len(session.Artifacts) < 2 {
+		t.Fatalf("expected artifacts from legacy fixture, got %d", len(session.Artifacts))
 	}
-	if len(transcript.ToolRuns) < 2 {
-		t.Fatalf("expected tool runs from legacy fixture, got %d", len(transcript.ToolRuns))
+	if len(session.ToolRuns) < 2 {
+		t.Fatalf("expected tool runs from legacy fixture, got %d", len(session.ToolRuns))
 	}
 }
 
