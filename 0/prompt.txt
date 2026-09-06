@@ -1,0 +1,28 @@
+Step 5: Build and Place on $PATH
+Build the executable and place it where Entire's CLI can discover it:
+
+Bash
+# Compile binary with required naming convention
+go build -o entire-agent-antigravity .
+
+# Move to GOPATH/bin or /usr/local/bin
+export PATH="$PWD:$PATH"
+cp entire-agent-antigravity $(go env GOPATH)/bin/
+Verify that the CLI protocol works manually:
+
+Bash
+entire-agent-antigravity info
+Expected output:
+
+JSON
+{
+  "name": "antigravity",
+  "version": "0.1.0",
+  "description": "Entire Checkpoint adapter for Google Antigravity Agent and Artifacts",
+  "features": {
+    "artifact_preservation": true,
+    "compact_transcripts": true,
+    "hooks": true,
+    "transcripts": true
+  }
+}
