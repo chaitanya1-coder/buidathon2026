@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 type ToolCall struct {
@@ -37,72 +36,6 @@ func artifactTypeFromName(name string) string {
 	default:
 		return "artifact"
 	}
-}
-
-func parseAntigravityExecutionLogs(logData []byte) []CapturedToolRun {
-	var toolRuns []CapturedToolRun
-	lines := strings.Split(string(logData), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		var record CapturedToolRun
-		if err := json.Unmarshal([]byte(line), &record); err == nil && record.ToolName != "" {
-			toolRuns = append(toolRuns, record)
-			continue
-		}
-		// Plain text log format fallback parsing: [TOOL] ToolName | Command | Output | ExitCode
-		if strings.HasPrefix(line, "[TOOL]") {
-			parts := strings.SplitN(line, "|", 4)
-			rec := CapturedToolRun{}
-			if len(parts) > 0 {
-				rec.ToolName = strings.TrimSpace(strings.TrimPrefix(parts[0], "[TOOL]"))
-			}
-			if len(parts) > 1 {
-				rec.Command = strings.TrimSpace(parts[1])
-			}
-			if len(parts) > 2 {
-				rec.Output = strings.TrimSpace(parts[2])
-			}
-			toolRuns = append(toolRuns, rec)
-		}
-	}
-	return toolRuns
-}
-
-func CollectAntigravitySession(workspaceRoot string) (*EntireTranscript, error) {
-	transcript := &EntireTranscript{
-		Agent:     "antigravity",
-		Timestamp: time.Now(),
-	}
-
-	// 1. Ingest Task List and Implementation Plan Artifacts
-	artifactsDir := filepath.Join(workspaceRoot, ".antigravity", "artifacts")
-	if files, err := os.ReadDir(artifactsDir); err == nil {
-		for _, file := range files {
-			if file.IsDir() {
-				continue
-			}
-			content, err := os.ReadFile(filepath.Join(artifactsDir, file.Name()))
-			if err == nil {
-				transcript.Artifacts = append(transcript.Artifacts, CapturedArtifact{
-					Name:    file.Name(),
-					Type:    artifactTypeFromName(file.Name()),
-					Content: string(content),
-				})
-			}
-		}
-	}
-
-	// 2. Ingest Terminal / Execution logs generated during agent run
-	logPath := filepath.Join(workspaceRoot, ".antigravity", "execution.log")
-	if logData, err := os.ReadFile(logPath); err == nil {
-		// Parse tool events, exit codes, and output blocks
-		transcript.ToolRuns = parseAntigravityExecutionLogs(logData)
-	}
-
-	return transcript, nil
 }
 
 func findTranscriptFile(sessionID string) (string, error) {
@@ -150,12 +83,13 @@ func findTranscriptFile(sessionID string) (string, error) {
 }
 
 func handleTranscript(sessionID string) error {
-	workspaceRoot, _ := os.Getwd()
-	sessionTranscript, err := CollectAntigravitySession(workspaceRoot)
+	sessionTranscript, err := IngestSession()
 	if err != nil {
 		return fmt.Errorf("failed collecting session: %w", err)
 	}
-	sessionTranscript.SessionID = sessionID
+	if sessionID != "" {
+		sessionTranscript.SessionID = sessionID
+	}
 
 	// Try reading detailed transcript steps and session artifacts from session directory if available
 	filePath, err := findTranscriptFile(sessionID)
