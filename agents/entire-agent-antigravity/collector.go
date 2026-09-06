@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 )
 
 // FindWorkspaceRoot ascends directories to find .antigravity or .git
@@ -27,38 +30,122 @@ func FindWorkspaceRoot() (string, error) {
 	return os.Getwd()
 }
 
-// IngestSession parses Antigravity inputs through the unified SessionIR pipeline.
+// IngestSession parses Antigravity inputs through the dual-format SessionIR pipeline.
 func IngestSession() (*EntireTranscript, error) {
 	root, err := FindWorkspaceRoot()
 	if err != nil {
 		return nil, err
 	}
 
-	session := NewSessionIR()
-
-	v1Parser := &V1Parser{}
-	v1Session, err := v1Parser.Parse(root)
-	if err != nil {
-		session.MarkPartial("v1 parser error: " + err.Error())
-	} else {
-		session = MergeSessionIR(session, v1Session)
+	session := &SessionIR{
+		SessionID:   fmt.Sprintf("ag-%d", time.Now().Unix()),
+		Agent:       "antigravity",
+		Timestamp:   time.Now().UTC(),
+		UserPrompts: []string{},
+		Artifacts:   []CapturedArtifact{},
+		ToolRuns:    []CapturedToolRun{},
+		FilesEdited: []string{},
 	}
 
-	v2Parser := &V2Parser{}
-	v2Session, err := v2Parser.Parse(root)
-	if err != nil {
-		session.MarkPartial("v2 parser error: " + err.Error())
-	} else {
-		session = MergeSessionIR(session, v2Session)
+	legacy := ingestLegacyFiles(root)
+	session = MergeSessionIR(session, legacy)
+
+	for _, streamFile := range []string{"execution.jsonl", "session.jsonl"} {
+		path := filepath.Join(root, ".antigravity", streamFile)
+		file, err := os.Open(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			session.IsPartial = true
+			session.Warnings = append(session.Warnings, "failed to open "+streamFile+": "+err.Error())
+			continue
+		}
+
+		streamIR, err := ParseStream(file)
+		file.Close()
+		if err != nil {
+			session.IsPartial = true
+			session.Warnings = append(session.Warnings, streamFile+" parse error: "+err.Error())
+			continue
+		}
+		session = MergeSessionIR(session, streamIR)
 	}
 
 	if len(session.UserPrompts) == 0 &&
 		len(session.Artifacts) == 0 &&
 		len(session.ToolRuns) == 0 &&
-		len(session.FilesEdited) == 0 &&
-		len(session.RawEvents) == 0 {
-		session.MarkPartial("no ingestible session data found in .antigravity")
+		len(session.FilesEdited) == 0 {
+		session.IsPartial = true
+		session.Warnings = append(session.Warnings, "no ingestible session data found in .antigravity")
 	}
 
 	return session.ToEntireTranscript(), nil
+}
+
+func ingestLegacyFiles(root string) *SessionIR {
+	ir := &SessionIR{
+		Agent:       "antigravity",
+		Timestamp:   time.Now().UTC(),
+		UserPrompts: []string{},
+		Artifacts:   []CapturedArtifact{},
+		ToolRuns:    []CapturedToolRun{},
+		FilesEdited: []string{},
+	}
+
+	antigravityDir := filepath.Join(root, ".antigravity")
+
+	promptFile := filepath.Join(antigravityDir, "last_prompt.txt")
+	if promptData, err := os.ReadFile(promptFile); err == nil {
+		if prompt := strings.TrimSpace(string(promptData)); prompt != "" {
+			ir.UserPrompts = append(ir.UserPrompts, prompt)
+		}
+	} else if !os.IsNotExist(err) {
+		ir.IsPartial = true
+		ir.Warnings = append(ir.Warnings, "failed to read last_prompt.txt: "+err.Error())
+	}
+
+	artifactsDir := filepath.Join(antigravityDir, "artifacts")
+	entries, err := os.ReadDir(artifactsDir)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			ir.IsPartial = true
+			ir.Warnings = append(ir.Warnings, "failed to read artifacts directory: "+err.Error())
+		}
+		return ir
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(artifactsDir, entry.Name())
+		content, readErr := os.ReadFile(path)
+		if readErr != nil {
+			ir.IsPartial = true
+			ir.Warnings = append(ir.Warnings, "failed to read artifact "+entry.Name()+": "+readErr.Error())
+			continue
+		}
+		ir.Artifacts = append(ir.Artifacts, CapturedArtifact{
+			Name:    entry.Name(),
+			Type:    artifactTypeFromName(entry.Name()),
+			Content: string(content),
+		})
+	}
+
+	return ir
+}
+
+func artifactTypeFromName(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "task"):
+		return "task"
+	case strings.Contains(lower, "plan"):
+		return "plan"
+	case strings.Contains(lower, "verify"):
+		return "verification"
+	default:
+		return "artifact"
+	}
 }
